@@ -30,7 +30,6 @@
 
 #ifndef OPENSLIDE_OPENSLIDE_H_
 #define OPENSLIDE_OPENSLIDE_H_
-#define CUSTOM_OPENSLIDE
 
 #include "openslide-features.h"
 
@@ -78,7 +77,7 @@ typedef struct _openslide_cache openslide_cache_t;
  * Otherwise, return NULL.  Calling openslide_open() on this file will also
  * return NULL.
  *
- * @param filename The filename to check.
+ * @param filename The filename to check.  On Windows, this must be in UTF-8.
  * @return An identification of the format vendor for this file, or NULL.
  * @since 3.4.0
  */
@@ -94,7 +93,7 @@ const char *openslide_detect_vendor(const char *filename);
  * request.  Instead, it should maintain a cache of OpenSlide objects and
  * reuse them when possible.
  *
- * @param filename The filename to open.
+ * @param filename The filename to open.  On Windows, this must be in UTF-8.
  * @return
  *         On success, a new OpenSlide object.
  *         If the file is not recognized by OpenSlide, NULL.
@@ -115,15 +114,6 @@ openslide_t *openslide_open(const char *filename);
 OPENSLIDE_PUBLIC()
 int32_t openslide_get_level_count(openslide_t *osr);
 
-/**
- * Set the cache size of the whole slide image.
- *
- * @param osr The OpenSlide object.
- * @param level The cache size in bytes
- * @since 3.3.0
- */
-OPENSLIDE_PUBLIC()
-void openslide_set_cache_size(openslide_t *osr, int32_t cache_size);
 
 /**
  * Get the dimensions of level 0 (the largest level). Exactly
@@ -552,7 +542,7 @@ const char *openslide_get_version(void);
  * openslide_open(), but it could also erroneously return @p true in some
  * cases where openslide_open() would fail.
  *
- * @param filename The filename to check.
+ * @param filename The filename to check.  On Windows, this must be in UTF-8.
  * @return If openslide_open() will succeed.
  * @deprecated Use openslide_detect_vendor() to efficiently check whether
  *             a slide file is recognized by OpenSlide, or just call
