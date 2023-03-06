@@ -371,7 +371,6 @@ static void tiff_item_destroy(gpointer data) {
 
 static struct tiff_directory *read_directory(struct _openslide_file *f,
                                              uint64_t *diroff,
-                                             struct tiff_directory *first_dir,
                                              GHashTable *loop_detector,
                                              bool bigtiff,
                                              bool ndpi,
@@ -459,7 +458,9 @@ static struct tiff_directory *read_directory(struct _openslide_file *f,
     }
 
     // read in the value/offset
-    uint8_t value[bigtiff ? 8 : 4];
+    uint8_t value[(bigtiff || ndpi) ? 8 : 4];
+    size_t read_size = (bigtiff ? 8 : 4);    
+
     if (_openslide_fread(f, value, sizeof(value)) != sizeof(value)) {
       g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
                   "Cannot read value/offset");
@@ -472,16 +473,16 @@ static struct tiff_directory *read_directory(struct _openslide_file *f,
     // append this to the current value/offset
     if (ndpi) {
       // seek to value/offset extension
-      if (fseeko(f, off+(12L*dircount)+(4L*n)+10L, SEEK_SET) != 0) {
-        _openslide_io_error(err, "Cannot seek to value/offset extension.");
-        goto FAIL;
+      if (!_openslide_fseek(f, off+(12L*dircount)+(4L*n)+10L, SEEK_SET, err)) {
+        g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED, "Cannot seek to value/offset extension.");
+        return NULL;
       }
         
       // read in the value/offset extension
-      if (fread(value+4, 4, 1, f) != 1) {
+      if (_openslide_fread(f, value+4, 4) != 1) {
         g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
                     "Cannot read value/offset extension");
-        goto FAIL;
+        return NULL;
       }
       
       // if the value/offset contains the value and the extension is nonzero, update the value size and item type
@@ -491,9 +492,9 @@ static struct tiff_directory *read_directory(struct _openslide_file *f,
       }
       
       // seek back to the tag's position in the IFD
-      if (fseeko(f, off+(12L*(n+1))+2L, SEEK_SET) != 0) {
-        _openslide_io_error(err, "Seeking back to IFD failed.");
-        goto FAIL;
+      if (!_openslide_fseek(f, off+(12L*(n+1))+2L, SEEK_SET, err)) {
+        g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED, "Seeking back to IFD failed.");
+        return NULL;
       }
     }
 
