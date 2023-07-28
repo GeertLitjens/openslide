@@ -133,13 +133,13 @@ struct tile {
 
 static void destroy_level(struct level *l) {
   _openslide_grid_destroy(l->grid);
-  g_slice_free(struct level, l);
+  g_free(l);
 }
 
 static void destroy(openslide_t *osr) {
   struct ventana_ops_data *data = osr->data;
   _openslide_tiffcache_destroy(data->tc);
-  g_slice_free(struct ventana_ops_data, data);
+  g_free(data);
 
   for (int32_t i = 0; i < osr->level_count; i++) {
     destroy_level((struct level *) osr->levels[i]);
@@ -176,22 +176,22 @@ static bool read_subtile(openslide_t *osr,
                                             level, tile_col, tile_row,
                                             &cache_entry);
   if (!tiledata) {
-    g_auto(_openslide_slice) box = _openslide_slice_alloc(tw * th * 4);
+    g_autofree uint32_t *buf = g_malloc(tw * th * 4);
     if (!_openslide_tiff_read_tile(tiffl, tiff,
-                                   box.p, tile_col, tile_row,
+                                   buf, tile_col, tile_row,
                                    err)) {
       return false;
     }
 
     // clip, if necessary
-    if (!_openslide_tiff_clip_tile(tiffl, box.p,
+    if (!_openslide_tiff_clip_tile(tiffl, buf,
                                    tile_col, tile_row,
                                    err)) {
       return false;
     }
 
     // put it in the cache
-    tiledata = _openslide_slice_steal(&box);
+    tiledata = g_steal_pointer(&buf);
     _openslide_cache_put(osr->cache, level, tile_col, tile_row,
                          tiledata, tw * th * 4,
                          &cache_entry);
@@ -263,8 +263,21 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
                                       err);
 }
 
+static bool read_icc_profile(openslide_t *osr, void *dest, GError **err) {
+  struct level *l = (struct level *) osr->levels[0];
+  struct ventana_ops_data *data = osr->data;
+
+  g_auto(_openslide_cached_tiff) ct = _openslide_tiffcache_get(data->tc, err);
+  if (!ct.tiff) {
+    return false;
+  }
+
+  return _openslide_tiff_read_icc_profile(osr, &l->tiffl, ct.tiff, dest, err);
+}
+
 static const struct _openslide_ops ventana_ops = {
   .paint_region = paint_region,
+  .read_icc_profile = read_icc_profile,
   .destroy = destroy,
 };
 
@@ -332,7 +345,7 @@ static bool ventana_detect(const char *filename G_GNUC_UNUSED,
 
 static void area_free(struct area *area) {
   g_free(area->tiles);
-  g_slice_free(struct area, area);
+  g_free(area);
 }
 
 static void bif_free(struct bif *bif) {
@@ -340,7 +353,7 @@ static void bif_free(struct bif *bif) {
     area_free(bif->areas[i]);
   }
   g_free(bif->areas);
-  g_slice_free(struct bif, bif);
+  g_free(bif);
 }
 
 typedef struct bif bif;
@@ -470,7 +483,7 @@ static struct bif *parse_level0_xml(const char *xml,
     }
 
     // create area
-    struct area *area = g_slice_new0(struct area);
+    struct area *area = g_new0(struct area, 1);
     g_ptr_array_add(area_array, area);
 
     // get start tiles
@@ -596,7 +609,7 @@ static struct bif *parse_level0_xml(const char *xml,
   }
 
   // create wrapper struct
-  g_autoptr(bif) bif = g_slice_new0(struct bif);
+  g_autoptr(bif) bif = g_new0(struct bif, 1);
   bif->num_areas = area_array->len;
   bif->areas =
     (struct area **) g_ptr_array_free(g_steal_pointer(&area_array), false);
@@ -839,7 +852,7 @@ static bool ventana_open(openslide_t *osr, const char *filename,
       }
 
       // create level
-      struct level *l = g_slice_new0(struct level);
+      struct level *l = g_new0(struct level, 1);
       struct _openslide_tiff_level *tiffl = &l->tiffl;
       g_ptr_array_add(level_array, l);
       if (!_openslide_tiff_level_init(ct.tiff, dir,
@@ -929,8 +942,16 @@ static bool ventana_open(openslide_t *osr, const char *filename,
     return false;
   }
 
+  // get icc profile size, if present
+  if (!_openslide_tiff_get_icc_profile_size(&level0->tiffl,
+                                            ct.tiff,
+                                            &osr->icc_profile_size,
+                                            err)) {
+    return false;
+  }
+
   // allocate private data
-  struct ventana_ops_data *data = g_slice_new0(struct ventana_ops_data);
+  struct ventana_ops_data *data = g_new0(struct ventana_ops_data, 1);
   data->tc = g_steal_pointer(&tc);
 
   // store osr data

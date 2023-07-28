@@ -61,7 +61,7 @@ static void destroy_level(struct level *l) {
     g_hash_table_destroy(l->missing_tiles);
   }
   _openslide_grid_destroy(l->grid);
-  g_slice_free(struct level, l);
+  g_free(l);
 }
 
 static void destroy(openslide_t *osr) {
@@ -72,7 +72,7 @@ static void destroy(openslide_t *osr) {
 
   struct aperio_ops_data *data = osr->data;
   _openslide_tiffcache_destroy(data->tc);
-  g_slice_free(struct aperio_ops_data, data);
+  g_free(data);
 }
 
 static bool render_missing_tile(struct level *l,
@@ -188,20 +188,20 @@ static bool read_tile(openslide_t *osr,
                                             level, tile_col, tile_row,
                                             &cache_entry);
   if (!tiledata) {
-    g_auto(_openslide_slice) box = _openslide_slice_alloc(tw * th * 4);
-    if (!decode_tile(l, tiff, box.p, tile_col, tile_row, err)) {
+    g_autofree uint32_t *buf = g_malloc(tw * th * 4);
+    if (!decode_tile(l, tiff, buf, tile_col, tile_row, err)) {
       return false;
     }
 
     // clip, if necessary
-    if (!_openslide_tiff_clip_tile(tiffl, box.p,
+    if (!_openslide_tiff_clip_tile(tiffl, buf,
                                    tile_col, tile_row,
                                    err)) {
       return false;
     }
 
     // put it in the cache
-    tiledata = _openslide_slice_steal(&box);
+    tiledata = g_steal_pointer(&buf);
     _openslide_cache_put(osr->cache, level, tile_col, tile_row,
 			 tiledata, tw * th * 4,
 			 &cache_entry);
@@ -238,8 +238,21 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
                                       err);
 }
 
+static bool read_icc_profile(openslide_t *osr, void *dest, GError **err) {
+  struct level *l = (struct level *) osr->levels[0];
+  struct aperio_ops_data *data = osr->data;
+
+  g_auto(_openslide_cached_tiff) ct = _openslide_tiffcache_get(data->tc, err);
+  if (!ct.tiff) {
+    return false;
+  }
+
+  return _openslide_tiff_read_icc_profile(osr, &l->tiffl, ct.tiff, dest, err);
+}
+
 static const struct _openslide_ops aperio_ops = {
   .paint_region = paint_region,
+  .read_icc_profile = read_icc_profile,
   .destroy = destroy,
 };
 
@@ -437,7 +450,7 @@ static bool aperio_open(openslide_t *osr,
     // for aperio, the tiled directories are the ones we want
     if (TIFFIsTiled(ct.tiff)) {
       //g_debug("tiled directory: %d", dir);
-      struct level *l = g_slice_new0(struct level);
+      struct level *l = g_new0(struct level, 1);
       struct _openslide_tiff_level *tiffl = &l->tiffl;
       if (level_array->len) {
         l->prev = level_array->pdata[level_array->len - 1];
@@ -515,6 +528,15 @@ static bool aperio_open(openslide_t *osr,
   g_auto(GStrv) props = g_strsplit(image_desc, "|", -1);
   add_properties(osr, props);
 
+  // get icc profile size, if present
+  struct level *base_level = level_array->pdata[0];
+  if (!_openslide_tiff_get_icc_profile_size(&base_level->tiffl,
+                                            ct.tiff,
+                                            &osr->icc_profile_size,
+                                            err)) {
+    return false;
+  }
+
   // set hash and properties
   struct level *top_level = level_array->pdata[level_array->len - 1];
   if (!_openslide_tifflike_init_properties_and_hash(osr, tl, quickhash1,
@@ -525,7 +547,7 @@ static bool aperio_open(openslide_t *osr,
   }
 
   // allocate private data
-  struct aperio_ops_data *data = g_slice_new0(struct aperio_ops_data);
+  struct aperio_ops_data *data = g_new0(struct aperio_ops_data, 1);
   data->tc = g_steal_pointer(&tc);
 
   // store osr data

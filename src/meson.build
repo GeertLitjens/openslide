@@ -66,19 +66,22 @@ openslide_sources = [
   'openslide-vendor-hamamatsu.c',
   'openslide-vendor-leica.c',
   'openslide-vendor-mirax.c',
-  'openslide-vendor-philips.c',
+  'openslide-vendor-philips-tiff.c',
   'openslide-vendor-sakura.c',
   'openslide-vendor-synthetic.c',
   'openslide-vendor-trestle.c',
   'openslide-vendor-ventana.c',
 ]
 if dicom_dep.found()
-  openslide_sources += 'openslide-vendor-dicom.c'
+  openslide_sources += [
+    'openslide-decode-dicom.c',
+    'openslide-vendor-dicom.c',
+  ]
 endif
 libopenslide = library('openslide',
   openslide_sources,
   version : soversion,
-  c_args : ['-D_OPENSLIDE_BUILDING_DLL', '-DG_LOG_DOMAIN="Openslide"'],
+  c_args : ['-D_OPENSLIDE_BUILDING_DLL', '-DG_LOG_DOMAIN="OpenSlide"'],
   gnu_symbol_visibility : visibility,
   include_directories : config_h_include,
   dependencies : [

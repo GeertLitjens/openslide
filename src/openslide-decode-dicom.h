@@ -1,7 +1,9 @@
 /*
  *  OpenSlide, a library for reading whole slide image files
  *
- *  Copyright (c) 2007-2014 Carnegie Mellon University
+ *  Copyright (c) 2007-2015 Carnegie Mellon University
+ *  Copyright (c) 2011 Google, Inc.
+ *  Copyright (c) 2022-2023 Benjamin Gilbert
  *  All rights reserved.
  *
  *  OpenSlide is free software: you can redistribute it and/or modify
@@ -19,34 +21,16 @@
  *
  */
 
-#ifndef OPENSLIDE_COMMON_H
-#define OPENSLIDE_COMMON_H
+#ifndef OPENSLIDE_OPENSLIDE_DECODE_DICOM_H_
+#define OPENSLIDE_OPENSLIDE_DECODE_DICOM_H_
 
-#include <stdbool.h>
 #include <glib.h>
-#include <openslide.h>
+#include <dicom/dicom.h>
 
-#ifdef OPENSLIDE_PUBLIC
-G_DEFINE_AUTOPTR_CLEANUP_FUNC(openslide_t, openslide_close)
-#endif
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(DcmFilehandle, dcm_filehandle_destroy)
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(DcmFrame, dcm_frame_destroy)
 
-// cmdline
-
-void common_fix_argv(int *argc, char ***argv);
-
-bool common_parse_options(GOptionContext *ctx,
-                          int *argc, char ***argv,
-                          GError **err);
-
-// fail
-
-void common_warn(const char *fmt, ...);
-void common_fail(const char *fmt, ...) G_GNUC_NORETURN;
-bool common_warn_on_error(openslide_t *osr, const char *fmt, ...);
-void common_fail_on_error(openslide_t *osr, const char *fmt, ...);
-
-// fd
-
-char *common_get_fd_path(int fd);
+DcmFilehandle *_openslide_dicom_open(const char *filename, GError **err);
+void _openslide_dicom_propagate_error(GError **err, DcmError *dcm_error);
 
 #endif

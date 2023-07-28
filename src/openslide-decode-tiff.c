@@ -422,7 +422,7 @@ static bool get_associated_image_data(struct _openslide_associated_image *_img,
 static void destroy_associated_image(struct _openslide_associated_image *_img) {
   struct associated_image *img = (struct associated_image *) _img;
 
-  g_slice_free(struct associated_image, img);
+  g_free(img);
 }
 
 static const struct _openslide_associated_image_ops tiff_associated_ops = {
@@ -454,7 +454,7 @@ static bool _add_associated_image(openslide_t *osr,
   }
 
   // load into struct
-  struct associated_image *img = g_slice_new0(struct associated_image);
+  struct associated_image *img = g_new0(struct associated_image, 1);
   img->base.ops = &tiff_associated_ops;
   img->base.w = w;
   img->base.h = h;
@@ -481,6 +481,54 @@ bool _openslide_tiff_add_associated_image(openslide_t *osr,
   // safe even if successful
   g_prefix_error(err, "Can't read %s associated image: ", name);
   return ret;
+}
+
+bool _openslide_tiff_get_icc_profile_size(struct _openslide_tiff_level *tiffl,
+                                          TIFF *tiff,
+                                          int64_t *icc_profile_size,
+                                          GError **err) {
+  // set directory
+  SET_DIR_OR_FAIL(tiff, tiffl->dir);
+
+  // get profile
+  void *data;
+  uint32_t data_len;
+  if (TIFFGetField(tiff, TIFFTAG_ICCPROFILE, &data_len, &data)) {
+    *icc_profile_size = data_len;
+  } else {
+    // 0 means no profile available
+    *icc_profile_size = 0;
+  }
+
+  return true;
+}
+
+bool _openslide_tiff_read_icc_profile(openslide_t *osr,
+                                      struct _openslide_tiff_level *tiffl,
+                                      TIFF *tiff,
+                                      void *dest,
+                                      GError **err) {
+  // set directory
+  SET_DIR_OR_FAIL(tiff, tiffl->dir);
+
+  // get profile
+  uint32_t data_len;
+  void *data;
+  if (!TIFFGetField(tiff, TIFFTAG_ICCPROFILE, &data_len, &data)) {
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                "No ICC profile");
+    return false;
+  }
+
+  // copy to output
+  if (data_len != osr->icc_profile_size) {
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                "ICC profile size changed");
+    return false;
+  }
+  memcpy(dest, data, data_len);
+
+  return true;
 }
 
 static tsize_t tiff_do_read(thandle_t th, tdata_t buf, tsize_t size) {
@@ -529,7 +577,7 @@ static toff_t tiff_do_seek(thandle_t th, toff_t offset, int whence) {
 static int tiff_do_close(thandle_t th) {
   struct tiff_file_handle *hdl = th;
 
-  g_slice_free(struct tiff_file_handle, hdl);
+  g_free(hdl);
   return 0;
 }
 
@@ -592,7 +640,7 @@ static TIFF *tiff_open(struct _openslide_tiffcache *tc, GError **err) {
   }
 
   // allocate
-  struct tiff_file_handle *hdl = g_slice_new0(struct tiff_file_handle);
+  struct tiff_file_handle *hdl = g_new0(struct tiff_file_handle, 1);
   hdl->tc = tc;
   hdl->size = size;
 
@@ -611,7 +659,7 @@ static TIFF *tiff_open(struct _openslide_tiffcache *tc, GError **err) {
 #define TIFFClientOpen _OPENSLIDE_POISON(_openslide_tiffcache_get)
 
 struct _openslide_tiffcache *_openslide_tiffcache_create(const char *filename) {
-  struct _openslide_tiffcache *tc = g_slice_new0(struct _openslide_tiffcache);
+  struct _openslide_tiffcache *tc = g_new0(struct _openslide_tiffcache, 1);
   tc->filename = g_strdup(filename);
   tc->cache = g_queue_new();
   g_mutex_init(&tc->lock);
@@ -681,5 +729,5 @@ void _openslide_tiffcache_destroy(struct _openslide_tiffcache *tc) {
   g_queue_free(tc->cache);
   g_mutex_clear(&tc->lock);
   g_free(tc->filename);
-  g_slice_free(struct _openslide_tiffcache, tc);
+  g_free(tc);
 }

@@ -119,15 +119,16 @@ static void check_api_failures(openslide_t *osr) {
   CHECK_EMPTY_PTR_ARRAY(openslide_get_property_names(osr));
   CHECK_RET(openslide_get_property_value(osr, OPENSLIDE_PROPERTY_NAME_VENDOR),
             NULL);
+  CHECK_RET(openslide_get_icc_profile_size(osr), -1);
   CHECK_EMPTY_PTR_ARRAY(openslide_get_associated_image_names(osr));
   CHECK_W_H(openslide_get_associated_image_dimensions(osr, "label", &w, &h),
             -1, -1);
   CHECK_W_H(openslide_get_associated_image_dimensions(osr, "macro", &w, &h),
             -1, -1);
+  CHECK_RET(openslide_get_associated_image_icc_profile_size(osr, "label"), -1);
+  CHECK_RET(openslide_get_associated_image_icc_profile_size(osr, "macro"), -1);
 
   openslide_read_region(osr, NULL, 0, 0, 0, 10, 10);
-  openslide_read_associated_image(osr, "label", NULL);
-  openslide_read_associated_image(osr, "macro", NULL);
 }
 
 static void check_props(openslide_t *osr) {
@@ -172,10 +173,9 @@ static void check_regions(openslide_t *osr) {
     int64_t w = g_ascii_strtoll(args[3], NULL, 10);
     int64_t h = g_ascii_strtoll(args[4], NULL, 10);
 
-    uint32_t *buf = g_slice_alloc(w * h * 4);
+    g_autofree uint32_t *buf = g_malloc(w * h * 4);
     openslide_read_region(osr, buf, x, y, level, w, h);
     check_error(osr);
-    g_slice_free1(w * h * 4, buf);
   }
 }
 
@@ -218,12 +218,11 @@ int main(int argc, char **argv) {
     }
   }
 
-  g_log_set_handler("Openslide", (GLogLevelFlags)
+  g_log_set_handler("OpenSlide", (GLogLevelFlags)
       (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING),
       print_log, NULL);
 
   const char *vendor = openslide_detect_vendor(filename);
-  bool can_open = openslide_can_open(filename);
   openslide_t *osr = openslide_open(filename);
 
   // Check vendor if requested
@@ -238,13 +237,6 @@ int main(int argc, char **argv) {
            vendor ? vendor : "NULL",
            expected_vendor ? expected_vendor : "NULL");
     }
-  }
-
-  // Check can_open
-  bool did_open = osr && openslide_get_error(osr) == NULL;
-  if (can_open != did_open) {
-    fail("openslide_can_open returned %d but openslide_open %s",
-         can_open, did_open ? "succeeded" : "failed");
   }
 
   // Check for open errors

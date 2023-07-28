@@ -178,6 +178,10 @@ int32_t openslide_get_best_level_for_downsample(openslide_t *osr,
  * bytes in length. If an error occurs or has occurred, then the memory
  * pointed to by @p dest will be cleared.
  *
+ * The returned pixel data is in the color space of the whole slide image,
+ * which may or may not be sRGB.  You can get the ICC profile for the
+ * slide's color space, if available, with openslide_read_icc_profile().
+ *
  * For more information about processing pre-multiplied pixel data, see
  * the [OpenSlide website](https://openslide.org/docs/premultiplied-argb/).
  *
@@ -195,6 +199,35 @@ void openslide_read_region(openslide_t *osr,
 			   int64_t x, int64_t y,
 			   int32_t level,
 			   int64_t w, int64_t h);
+
+
+/**
+ * Get the size in bytes of the ICC profile for the whole slide image.
+ *
+ * @param osr The OpenSlide object.
+ * @return -1 on error, 0 if no profile is available, otherwise the profile
+ * size in bytes.
+ */
+OPENSLIDE_PUBLIC()
+int64_t openslide_get_icc_profile_size(openslide_t *osr);
+
+
+/**
+ * Copy the ICC profile from a whole slide image.
+ *
+ * This function reads the ICC profile from the slide into the specified
+ * memory location.  @p dest must be a valid pointer to enough memory
+ * to hold the profile.  Get the profile size with
+ * openslide_get_icc_profile_size().
+ *
+ * If an error occurs or has occurred, then the memory pointed to by @p dest
+ * will be cleared.
+ *
+ * @param osr The OpenSlide object.
+ * @param dest The destination buffer for the ICC profile.
+ */
+OPENSLIDE_PUBLIC()
+void openslide_read_icc_profile(openslide_t *osr, void *dest);
 
 
 /**
@@ -260,27 +293,6 @@ const char *openslide_get_error(openslide_t *osr);
 //@{
 
 /**
- * The name of the property containing a slide's comment, if any.
- *
- * @since 3.0.0
- */
-#define OPENSLIDE_PROPERTY_NAME_COMMENT "openslide.comment"
-
-/**
- * The name of the property containing an identification of the vendor.
- *
- * @since 3.0.0
- */
-#define OPENSLIDE_PROPERTY_NAME_VENDOR "openslide.vendor"
-
-/**
- * The name of the property containing the "quickhash-1" sum.
- *
- * @since 3.0.0
- */
-#define OPENSLIDE_PROPERTY_NAME_QUICKHASH1 "openslide.quickhash-1"
-
-/**
  * The name of the property containing a slide's background color, if any.
  * It is represented as an RGB hex triplet.
  *
@@ -289,27 +301,20 @@ const char *openslide_get_error(openslide_t *osr);
 #define OPENSLIDE_PROPERTY_NAME_BACKGROUND_COLOR "openslide.background-color"
 
 /**
- * The name of the property containing a slide's objective power, if known.
+ * The name of the property containing the height of the rectangle bounding
+ * the non-empty region of the slide, if available.
  *
- * @since 3.3.0
+ * @since 3.4.0
  */
-#define OPENSLIDE_PROPERTY_NAME_OBJECTIVE_POWER "openslide.objective-power"
+#define OPENSLIDE_PROPERTY_NAME_BOUNDS_HEIGHT "openslide.bounds-height"
 
 /**
- * The name of the property containing the number of microns per pixel in
- * the X dimension of level 0, if known.
+ * The name of the property containing the width of the rectangle bounding
+ * the non-empty region of the slide, if available.
  *
- * @since 3.3.0
+ * @since 3.4.0
  */
-#define OPENSLIDE_PROPERTY_NAME_MPP_X "openslide.mpp-x"
-
-/**
- * The name of the property containing the number of microns per pixel in
- * the Y dimension of level 0, if known.
- *
- * @since 3.3.0
- */
-#define OPENSLIDE_PROPERTY_NAME_MPP_Y "openslide.mpp-y"
+#define OPENSLIDE_PROPERTY_NAME_BOUNDS_WIDTH "openslide.bounds-width"
 
 /**
  * The name of the property containing the X coordinate of the rectangle
@@ -328,20 +333,57 @@ const char *openslide_get_error(openslide_t *osr);
 #define OPENSLIDE_PROPERTY_NAME_BOUNDS_Y "openslide.bounds-y"
 
 /**
- * The name of the property containing the width of the rectangle bounding
- * the non-empty region of the slide, if available.
+ * The name of the property containing a slide's comment, if any.
  *
- * @since 3.4.0
+ * @since 3.0.0
  */
-#define OPENSLIDE_PROPERTY_NAME_BOUNDS_WIDTH "openslide.bounds-width"
+#define OPENSLIDE_PROPERTY_NAME_COMMENT "openslide.comment"
 
 /**
- * The name of the property containing the height of the rectangle bounding
- * the non-empty region of the slide, if available.
+ * The name of the property containing the size of a slide's ICC profile,
+ * if any.
  *
- * @since 3.4.0
+ * @since 4.0.0
  */
-#define OPENSLIDE_PROPERTY_NAME_BOUNDS_HEIGHT "openslide.bounds-height"
+#define OPENSLIDE_PROPERTY_NAME_ICC_SIZE "openslide.icc-size"
+
+/**
+ * The name of the property containing the number of microns per pixel in
+ * the X dimension of level 0, if known.
+ *
+ * @since 3.3.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_MPP_X "openslide.mpp-x"
+
+/**
+ * The name of the property containing the number of microns per pixel in
+ * the Y dimension of level 0, if known.
+ *
+ * @since 3.3.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_MPP_Y "openslide.mpp-y"
+
+/**
+ * The name of the property containing a slide's objective power, if known.
+ *
+ * @since 3.3.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_OBJECTIVE_POWER "openslide.objective-power"
+
+/**
+ * The name of the property containing the "quickhash-1" sum.
+ *
+ * @since 3.0.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_QUICKHASH1 "openslide.quickhash-1"
+
+/**
+ * The name of the property containing an identification of the vendor.
+ *
+ * @since 3.0.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_VENDOR "openslide.vendor"
+
 //@}
 
 /**
@@ -372,7 +414,6 @@ const char *openslide_get_error(openslide_t *osr);
  */
 OPENSLIDE_PUBLIC()
 const char * const *openslide_get_property_names(openslide_t *osr);
-
 
 /**
  * Get the value of a single property.
@@ -440,21 +481,66 @@ void openslide_get_associated_image_dimensions(openslide_t *osr,
  * with a whole slide image. @p dest must be a valid pointer to enough
  * memory to hold the image, at least (width * height * 4) bytes in
  * length.  Get the width and height with
- * openslide_get_associated_image_dimensions(). This function does nothing
+ * openslide_get_associated_image_dimensions().
+ *
+ * If an error occurs or has occurred, then the memory pointed to by @p dest
+ * will be cleared. In versions prior to 4.0.0, this function did nothing
  * if an error occurred.
+ *
+ * The returned pixel data is in the color space of the associated image,
+ * which may or may not be sRGB.  You can get the ICC profile for the
+ * associated image's color space, if available, with
+ * openslide_read_associated_image_icc_profile().
  *
  * For more information about processing pre-multiplied pixel data, see
  * the [OpenSlide website](https://openslide.org/docs/premultiplied-argb/).
  *
  * @param osr The OpenSlide object.
- * @param dest The destination buffer for the ARGB data.
  * @param name The name of the desired associated image. Must be
  *             a valid name as given by openslide_get_associated_image_names().
+ * @param dest The destination buffer for the ARGB data.
  */
 OPENSLIDE_PUBLIC()
 void openslide_read_associated_image(openslide_t *osr,
 				     const char *name,
 				     uint32_t *dest);
+
+
+/**
+ * Get the size in bytes of the ICC profile for an associated image.
+ *
+ * @param osr The OpenSlide object.
+ * @param name The name of the desired associated image. Must be
+ *             a valid name as given by openslide_get_associated_image_names().
+ * @return -1 on error, 0 if no profile is available, otherwise the profile
+ * size in bytes.
+ */
+OPENSLIDE_PUBLIC()
+int64_t openslide_get_associated_image_icc_profile_size(openslide_t *osr,
+                                                        const char *name);
+
+
+/**
+ * Copy the ICC profile from an associated image.
+ *
+ * This function reads the ICC profile from an associated image into the
+ * specified memory location.  @p dest must be a valid pointer to enough
+ * memory to hold the profile.  Get the profile size with
+ * openslide_get_associated_image_icc_profile_size().
+ *
+ * If an error occurs or has occurred, then the memory pointed to by @p dest
+ * will be cleared.
+ *
+ * @param osr The OpenSlide object.
+ * @param name The name of the desired associated image. Must be
+ *             a valid name as given by openslide_get_associated_image_names().
+ * @param dest The destination buffer for the ICC profile.
+ */
+OPENSLIDE_PUBLIC()
+void openslide_read_associated_image_icc_profile(openslide_t *osr,
+                                                 const char *name,
+                                                 void *dest);
+
 //@}
 
 /**
@@ -474,7 +560,7 @@ void openslide_read_associated_image(openslide_t *osr,
  *
  * @param capacity The capacity of the cache, in bytes.
  * @return A new cache.
- * @since 3.5.0
+ * @since 4.0.0
  */
 OPENSLIDE_PUBLIC()
 openslide_cache_t *openslide_cache_create(size_t capacity);
@@ -485,7 +571,7 @@ openslide_cache_t *openslide_cache_create(size_t capacity);
  *
  * @param osr The OpenSlide object.
  * @param cache The cache to attach.
- * @since 3.5.0
+ * @since 4.0.0
  */
 OPENSLIDE_PUBLIC()
 void openslide_set_cache(openslide_t *osr, openslide_cache_t *cache);
@@ -496,7 +582,7 @@ void openslide_set_cache(openslide_t *osr, openslide_cache_t *cache);
  * object is closed.
  *
  * @param cache The cache to release.
- * @since 3.5.0
+ * @since 4.0.0
  */
 OPENSLIDE_PUBLIC()
 void openslide_cache_release(openslide_cache_t *cache);
@@ -519,135 +605,6 @@ OPENSLIDE_PUBLIC()
 const char *openslide_get_version(void);
 
 //@}
-
-/**
- * @name Deprecated Functions
- * Functions that will be removed in the next major release.
- *
- * Before version 3.3.0, OpenSlide used the term "layer" to refer to a
- * slide level.  Many of these functions use the older terminology.
- */
-//@{
-
-/**
- * Return whether openslide_open() will succeed.
- *
- * This function returns @p true if openslide_open() will return a valid
- * @ref openslide_t, or @p false if it will return NULL or an
- * @ref openslide_t in error state.  As such, there's no reason to use it;
- * just call openslide_open().  For a less-expensive test that provides
- * weaker guarantees, see openslide_detect_vendor().
- *
- * Before version 3.4.0, this function could be slightly faster than calling
- * openslide_open(), but it could also erroneously return @p true in some
- * cases where openslide_open() would fail.
- *
- * @param filename The filename to check.  On Windows, this must be in UTF-8.
- * @return If openslide_open() will succeed.
- * @deprecated Use openslide_detect_vendor() to efficiently check whether
- *             a slide file is recognized by OpenSlide, or just call
- *             openslide_open().
- */
-OPENSLIDE_PUBLIC()
-OPENSLIDE_DEPRECATED_FOR(openslide_detect_vendor or openslide_open)
-bool openslide_can_open(const char *filename);
-
-
-/**
- * Get the number of levels in the whole slide image.
- *
- * @param osr The OpenSlide object.
- * @return The number of levels, or -1 if an error occurred.
- * @deprecated Use openslide_get_level_count() instead.
- */
-OPENSLIDE_PUBLIC()
-OPENSLIDE_DEPRECATED_FOR(openslide_get_level_count)
-int32_t openslide_get_layer_count(openslide_t *osr);
-
-
-/**
- * Get the dimensions of level 0 (the largest level). Exactly
- * equivalent to calling openslide_get_level_dimensions(osr, 0, w, h).
- *
- * @param osr The OpenSlide object.
- * @param[out] w The width of the image, or -1 if an error occurred.
- * @param[out] h The height of the image, or -1 if an error occurred.
- * @deprecated Use openslide_get_level0_dimensions() instead.
- */
-OPENSLIDE_PUBLIC()
-OPENSLIDE_DEPRECATED_FOR(openslide_get_level0_dimensions)
-void openslide_get_layer0_dimensions(openslide_t *osr, int64_t *w, int64_t *h);
-
-
-/**
- * Get the dimensions of a level.
- *
- * @param osr The OpenSlide object.
- * @param level The desired level.
- * @param[out] w The width of the image, or -1 if an error occurred
- *               or the level was out of range.
- * @param[out] h The height of the image, or -1 if an error occurred
- *               or the level was out of range.
- * @deprecated Use openslide_get_level_dimensions() instead.
- */
-OPENSLIDE_PUBLIC()
-OPENSLIDE_DEPRECATED_FOR(openslide_get_level_dimensions)
-void openslide_get_layer_dimensions(openslide_t *osr, int32_t level,
-				    int64_t *w, int64_t *h);
-
-
-/**
- * Get the downsampling factor of a given level.
- *
- * @param osr The OpenSlide object.
- * @param level The desired level.
- * @return The downsampling factor for this level, or -1.0 if an error occurred
- *         or the level was out of range.
- * @deprecated Use openslide_get_level_downsample() instead.
- */
-OPENSLIDE_PUBLIC()
-OPENSLIDE_DEPRECATED_FOR(openslide_get_level_downsample)
-double openslide_get_layer_downsample(openslide_t *osr, int32_t level);
-
-
-/**
- * Get the best level to use for displaying the given downsample.
- *
- * @param osr The OpenSlide object.
- * @param downsample The downsample factor.
- * @return The level identifier, or -1 if an error occurred.
- * @deprecated Use openslide_get_best_level_for_downsample() instead.
- */
-OPENSLIDE_PUBLIC()
-OPENSLIDE_DEPRECATED_FOR(openslide_get_best_level_for_downsample)
-int32_t openslide_get_best_layer_for_downsample(openslide_t *osr,
-						double downsample);
-
-/**
- * Get the comment (if any) for this image. Exactly equivalent to calling
- * openslide_get_property_value() with #OPENSLIDE_PROPERTY_NAME_COMMENT.
- *
- * @param osr The OpenSlide object.
- * @return The comment for this image, or NULL if an error occurred.
- * @deprecated Call openslide_get_property_value() with
- *             #OPENSLIDE_PROPERTY_NAME_COMMENT instead.
- */
-OPENSLIDE_PUBLIC()
-OPENSLIDE_DEPRECATED_FOR(openslide_get_property_value(osr, OPENSLIDE_PROPERTY_NAME_COMMENT))
-const char *openslide_get_comment(openslide_t *osr);
-
-//@}
-
-#ifndef OPENSLIDE_SIMPLIFY_HEADERS
-// these are meant to throw compile- and link-time errors,
-// since the functions they replace were never implemented
-int _openslide_give_prefetch_hint_UNIMPLEMENTED(void);
-void _openslide_cancel_prefetch_hint_UNIMPLEMENTED(void);
-#define openslide_give_prefetch_hint(osr, x, y, level, w, h)	\
-  _openslide_give_prefetch_hint_UNIMPLEMENTED(-1);
-#define openslide_cancel_prefetch_hint(osr, prefetch_id)	\
-  _openslide_cancel_prefetch_hint_UNIMPLEMENTED(-1)
-#endif
 
 /**
  * @mainpage OpenSlide

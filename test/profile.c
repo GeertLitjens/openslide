@@ -45,13 +45,7 @@ int main(int argc, char **argv) {
   int level = atoi(argv[2]);
 
   g_autoptr(openslide_t) osr = openslide_open(path);
-  if (!osr) {
-    common_fail("Couldn't open %s", path);
-  }
-  const char *err = openslide_get_error(osr);
-  if (err) {
-    common_fail("Open failed: %s", err);
-  }
+  common_fail_on_error(osr, "Couldn't open %s", path);
   if (level >= openslide_get_level_count(osr)) {
     common_fail("No such level: %d", level);
   }
@@ -99,10 +93,7 @@ int main(int argc, char **argv) {
   CALLGRIND_STOP_INSTRUMENTATION;
 #endif
 
-  err = openslide_get_error(osr);
-  if (err) {
-    common_fail("Read failed: %s", err);
-  }
+  common_fail_on_error(osr, "Read failed");
 
   return 0;
 }
