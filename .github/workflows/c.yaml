@@ -14,6 +14,18 @@ env:
   PYTHONUNBUFFERED: 1
 
 jobs:
+  pre-commit:
+    name: Rerun pre-commit checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.0
   tests:
     name: Build
     runs-on: ${{ matrix.os }}
@@ -34,6 +46,9 @@ jobs:
             ignore-cloexec-leaks: ignore CLOEXEC leaks
           - os: ubuntu-latest
             container: debian:12
+          - os: ubuntu-latest
+            container: debian:12
+            arch: i386
           - os: ubuntu-20.04
             ignore-cloexec-leaks: ignore CLOEXEC leaks
           - os: ubuntu-22.04
@@ -46,7 +61,7 @@ jobs:
         macos-*)
             # https://github.com/actions/setup-python/issues/577
             # https://github.com/q3aiml/ledger/commit/f53b35ae
-            brew list -1 | grep python | while read formula; do
+            brew list -1 | grep python@ | while read formula; do
                 brew unlink $formula
                 brew link --overwrite $formula
             done
@@ -59,12 +74,12 @@ jobs:
                 libtiff \
                 openjpeg \
                 gdk-pixbuf \
+                libdicom \
                 libxml2 \
                 sqlite \
                 cairo \
                 glib \
-                xdelta \
-                doxygen
+                xdelta
             python3 -m pip install --upgrade pip
             python3 -m pip install requests PyYAML
             ;;
@@ -77,8 +92,7 @@ jobs:
                 8)
                     dnf install -y 'dnf-command(config-manager)'
                     dnf config-manager --set-enabled powertools
-                    # https://bugzilla.redhat.com/show_bug.cgi?id=2124013
-                    dnf copr enable -y bgilbert/el8-pixman-openslide
+                    dnf install -y epel-release epel-next-release
                     pyver=38
                     pydotver=3.8
                     python=python38
@@ -89,14 +103,14 @@ jobs:
                     dnf install -y epel-release epel-next-release
                     ;;
                 *)
-                    extra="git-core clang llvm valgrind valgrind-devel"
+                    extra="clang doxygen llvm valgrind valgrind-devel"
                     extra="$extra dnf-plugins-core"
                     debuginfo=1
                     ;;
                 esac
 
                 dnf install -y \
-                    gcc git meson pkg-config \
+                    gcc git-core meson pkg-config \
                     $python python${pyver}-requests python${pyver}-pyyaml \
                     diffutils \
                     zlib-devel \
@@ -105,11 +119,11 @@ jobs:
                     libtiff-devel \
                     openjpeg2-devel \
                     gdk-pixbuf2-modules gdk-pixbuf2-devel \
+                    libdicom-devel \
                     libxml2-devel \
                     sqlite-devel \
                     cairo-devel \
                     glib2-devel \
-                    doxygen \
                     xdelta libjpeg-turbo-utils $extra
 
                 if [ -n "$debuginfo" ]; then
@@ -128,35 +142,31 @@ jobs:
                     jpeg=libjpeg-turbo8-dev
                     sudo=sudo
                 fi
+                if [ -n "${{ matrix.arch }}" ]; then
+                    $sudo dpkg --add-architecture "${{ matrix.arch }}"
+                    arch=":${{ matrix.arch }}"
+                    extra=gcc-multilib
+                fi
                 $sudo apt-get update
                 $sudo apt-get -y install \
                     gcc git meson pkg-config \
                     python3-requests python3-yaml \
-                    zlib1g-dev \
-                    libpng-dev \
-                    $jpeg \
-                    libtiff-dev \
-                    libopenjp2-7-dev \
-                    libgdk-pixbuf2.0-dev \
-                    libxml2-dev \
-                    libsqlite3-dev \
-                    libcairo2-dev \
-                    libglib2.0-dev \
-                    doxygen \
-                    xdelta3 libjpeg-turbo-progs
+                    zlib1g-dev$arch \
+                    libpng-dev$arch \
+                    $jpeg$arch \
+                    libtiff-dev$arch \
+                    libopenjp2-7-dev$arch \
+                    libgdk-pixbuf2.0-dev$arch \
+                    libxml2-dev$arch \
+                    libsqlite3-dev$arch \
+                    libcairo2-dev$arch \
+                    libglib2.0-dev$arch \
+                    xdelta3 libjpeg-turbo-progs $extra
                 ;;
             esac
         esac
     - name: Check out repo
-      uses: actions/checkout@v3
-    - name: Check for uninitialized g_auto variables
-      if: matrix.extra
-      run: |
-        git config --global --add safe.directory $GITHUB_WORKSPACE
-        if git grep -En 'g_auto\(|g_autoptr\(|g_autofree ' | grep -v = ; then
-            echo "Found g_auto* declarations without initializers"
-            exit 1
-        fi
+      uses: actions/checkout@v4
     - name: Build
       run: |
         args=
@@ -164,6 +174,30 @@ jobs:
             # Some distro versions have leaky libraries
             echo "Disabling CLOEXEC leak check"
             args="-D_nonatomic_cloexec=true"
+        fi
+        if [ -n "${{ matrix.arch }}" ]; then
+            cat > cross.ini << EOF
+        [built-in options]
+        c_args = ['-O2', '-g', '-m32']
+        c_link_args = ['-m32']
+        cpp_args = ['-O2', '-g', '-m32']
+        cpp_link_args = ['-m32']
+
+        [properties]
+        pkg_config_libdir = ['/usr/lib/${{ matrix.arch }}-linux-gnu/pkgconfig', '/usr/share/pkgconfig']
+
+        [binaries]
+        c = 'gcc'
+        pkgconfig = 'pkg-config'
+        strip = 'strip'
+
+        [host_machine]
+        system = 'linux'
+        endian = 'little'
+        cpu_family = 'x86'
+        cpu = '${{ matrix.arch }}'
+        EOF
+            args="$args --cross-file=cross.ini"
         fi
         if ! meson setup builddir --werror $args; then
             cat builddir/meson-logs/meson-log.txt
@@ -185,7 +219,7 @@ jobs:
         echo "docroot=${docroot}" >> $GITHUB_ENV
     - name: Archive docs
       if: matrix.extra
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ env.docroot }}
         path: builddir/doc-artifact
@@ -194,21 +228,6 @@ jobs:
       with:
         key: pristine
         path: builddir/test/_slidedata/pristine
-    - name: Check for overlarge tests
-      if: matrix.extra
-      run: |
-        # We don't want to allow arbitrarily large binary diffs into the
-        # repo, where they'll live in the Git history forever.  At the time
-        # of writing, our largest xdelta diff is 4881 bytes.  Arbitrarily
-        # set the cutoff at 6000.
-        # https://openslide.org/docs/testsuite/#tips
-        THRESHOLD=6000
-        large=$(find test/cases -type f -size +${THRESHOLD}c)
-        if [ -n "$large" ]; then
-            echo "Found test case files larger than $THRESHOLD bytes:"
-            echo "$large"
-            exit 1
-        fi
     # Can't cache frozen tests because cache doesn't handle sparse files
     - name: Unpack tests
       run: |
@@ -235,17 +254,23 @@ jobs:
     name: Set up Windows build
     runs-on: ubuntu-latest
     outputs:
-      pkgver: ${{ steps.params.outputs.pkgver }}
+      suffix: ${{ steps.params.outputs.suffix }}
+      windows_builder_repo_and_digest: ${{ steps.find-windows.outputs.builder_repo_and_digest }}
     steps:
+      - name: Find Windows builder container digest
+        id: find-windows
+        uses: openslide/openslide-bin/.github/find-container-digest@main
+        with:
+          builder_image: windows
       - name: Calculate parameters
         id: params
         run: |
           case "${{ github.event_name }}" in
           pull_request)
-              echo "pkgver=pr-${{ github.event.number }}.${{ github.run_number }}.${{ github.run_attempt }}-$(echo ${{ github.sha }} | cut -c-7)" >> $GITHUB_OUTPUT
+              echo "suffix=$(date +%Y%m%d).pr.${{ github.event.number }}.${{ github.run_number }}.${{ github.run_attempt }}.$(echo ${{ github.sha }} | cut -c-7)" >> $GITHUB_OUTPUT
               ;;
           push)
-              echo "pkgver=${GITHUB_REF#refs/heads/}-$(echo ${{ github.sha }} | cut -c-7)" >> $GITHUB_OUTPUT
+              echo "suffix=$(date +%Y%m%d).${GITHUB_REF#refs/heads/}.$(echo ${{ github.sha }} | cut -c-7)" >> $GITHUB_OUTPUT
               ;;
           *)
               echo "Unknown event type ${{ github.event_name }}"
@@ -255,9 +280,10 @@ jobs:
   windows_build:
     name: Windows build
     needs: windows_setup
-    uses: openslide/openslide-winbuild/.github/workflows/windows.yml@main
+    uses: openslide/openslide-bin/.github/workflows/build.yml@main
     with:
       openslide_repo: ${{ github.repository }}
       openslide_ref: ${{ github.ref }}
-      pkgver: ${{ needs.windows_setup.outputs.pkgver }}
+      suffix: ${{ needs.windows_setup.outputs.suffix }}
       werror: true
+      windows_builder_repo_and_digest: ${{ needs.windows_setup.outputs.windows_builder_repo_and_digest }}

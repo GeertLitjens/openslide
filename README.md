@@ -63,16 +63,16 @@ more details.
 To build OpenSlide, you will need:
 
 - Meson
-- cairo &ge; 1.2
+- cairo ≥ 1.2
 - GDK-PixBuf
-- glib &ge; 2.56
-- libdicom &ge; 1.0 (automatically built if missing)
+- glib ≥ 2.56
+- libdicom ≥ 1.0 (automatically built if missing)
 - libjpeg
 - libpng
-- libtiff &ge; 4.0
+- libtiff ≥ 4.0
 - libxml2
-- OpenJPEG &ge; 2.1
-- SQLite &ge; 3.14
+- OpenJPEG ≥ 2.1
+- SQLite ≥ 3.14
 - zlib
 
 Then:
@@ -92,3 +92,8 @@ contributors.
 OpenSlide has been supported by the National Institutes of Health and
 the Clinical and Translational Science Institute at the University of
 Pittsburgh.
+
+Development of DICOM and ICC functionality was supported by NCI Imaging
+Data Commons and has been funded in whole or in part with Federal funds
+from the National Cancer Institute, National Institutes of Health, under
+Task Order No. HHSN26110071 under Contract No. HHSN261201500003l.

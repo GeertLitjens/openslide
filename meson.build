@@ -1,6 +1,6 @@
 project(
   'openslide', 'c',
-  version : '3.4.1',
+  version : '4.0.0',
   license : 'LGPL-2.1-only',
   default_options : [
     'buildtype=debugoptimized',
@@ -10,9 +10,8 @@ project(
   # limited by Ubuntu 20.04
   meson_version : '>=0.53',
 )
-# Shared library version.  Follow SemVer rules, except that major 0 isn't
-# special.
-soversion = '0.4.1'
+# Shared library version.  Follow SemVer rules.
+soversion = '1.0.0'
 
 if not meson.is_subproject()
   meson.add_dist_script(
@@ -68,39 +67,16 @@ add_project_link_arguments(
 )
 
 # fopen cloexec flag
-if host_machine.system() == 'windows'
+if host_machine.system() in ['dragonfly', 'freebsd', 'linux', 'netbsd', 'openbsd']
+  message('Using "e" flag for close-on-exec')
+  conf.set_quoted('FOPEN_CLOEXEC_FLAG', 'e')
+elif host_machine.system() == 'windows'
   message('Using "N" flag for close-on-exec (Windows)')
   conf.set_quoted('FOPEN_CLOEXEC_FLAG', 'N')
 else
-  code = '''
-  #include <stdio.h>
-  #include <unistd.h>
-  #include <fcntl.h>
-
-  int main(int argc, char **argv) {
-    FILE *fp = fopen("/dev/null", "re");
-    if (fp != NULL) {
-      int fd = fileno(fp);
-      if (fd != -1) {
-        long ret = fcntl(fd, F_GETFD);
-        if (ret != -1 && (ret & FD_CLOEXEC)) {
-          return 0;
-        }
-      }
-    }
-    return 1;
-  }
-  '''
-  result = cc.run(code, name : 'check fopen() close-on-exec flag')
-  if result.compiled() and result.returncode() == 0
-    # glibc >= 2.7, FreeBSD >= 10.0, NetBSD >= 6.0
-    message('Using "e" flag for close-on-exec')
-    conf.set_quoted('FOPEN_CLOEXEC_FLAG', 'e')
-  else
-    message('Using no close-on-exec flag (unknown or cross compile)')
-    conf.set_quoted('FOPEN_CLOEXEC_FLAG', '')
-    conf.set('NONATOMIC_CLOEXEC', 1)
-  endif
+  message('Using no close-on-exec flag (unknown)')
+  conf.set_quoted('FOPEN_CLOEXEC_FLAG', '')
+  conf.set('NONATOMIC_CLOEXEC', 1)
 endif
 if get_option('_nonatomic_cloexec')
   # CI sets this on Linux distros with libraries that don't correctly set
@@ -136,8 +112,7 @@ dicom_dep      = dependency(
   # avoid 'check' dependency
   default_options : ['tests=false'],
   fallback : ['libdicom', 'libdicom_dep'],
-  required : get_option('dicom'),
-  version : '>=0.5',
+  version : '>=1.0.0',
 )
 valgrind_dep   = dependency('valgrind', required : false)
 
@@ -148,10 +123,6 @@ doxygen = find_program(
 )
 
 # Dependency checks
-if dicom_dep.found()
-  conf.set('HAVE_LIBDICOM', 1)
-  feature_flags += 'dicom'
-endif
 if valgrind_dep.found()
   conf.set('HAVE_VALGRIND', 1)
 endif
@@ -160,11 +131,9 @@ if glib_dep.type_name() != 'internal'
   # Courtesy check that the compiler supports the cleanup attribute.  If
   # glib is another subpackage, we can't check, so fail at build time if not.
   # glib only offers autoptr macros when the compiler supports them.
-  cc.has_header_symbol(
-    'glib.h', 'G_DEFINE_AUTOPTR_CLEANUP_FUNC',
-    dependencies : glib_dep,
-    required : true,
-  )
+  if not cc.has_header_symbol('glib.h', 'g_autofree', dependencies : glib_dep)
+    error('OpenSlide requires the GNU C "cleanup" attribute.')
+  endif
 endif
 
 # Test configuration
@@ -190,6 +159,16 @@ endif
 
 # Test suite options
 visibility = get_option('_export_internal_symbols') ? '' : 'hidden'
+libopenslide_link_args = (
+  # On macOS, openslide-bin needs to keep non-OpenSlide symbols out of the
+  # combined dylib, but it can't do it via global link options without
+  # breaking the exports of the OpenSlide Java JNI library.  Until Meson
+  # allows passing compiler flags to individual subprojects, provide a
+  # workaround here.
+  # https://github.com/mesonbuild/meson/issues/11002
+  get_option('_filter_external_symbols') and host_machine.system() == 'darwin'
+  ? ['-Wl,-exported_symbol,_openslide_*'] : []
+)
 if get_option('_gcov')
   add_project_arguments(
     '-O0',
@@ -212,6 +191,7 @@ if get_option('_sanitize')
     '-fsanitize=address',
     # UB sanitizer
     '-fsanitize=undefined',
+    '-fsanitize=float-divide-by-zero',
     '-fsanitize=unsigned-integer-overflow',
     '-fsanitize=implicit-conversion',
     '-fsanitize=local-bounds',

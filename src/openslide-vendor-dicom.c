@@ -23,6 +23,8 @@
 
 /*
  * DICOM (.dcm) support
+ *
+ * quickhash comes from the Series Instance UID
  */
 
 /*
@@ -346,7 +348,7 @@ static struct dicom_file *dicom_file_new(const char *filename,
   }
 
   if (load_metadata) {
-    f->metadata = dcm_filehandle_get_metadata(&dcm_error, f->filehandle);
+    f->metadata = dcm_filehandle_get_metadata_subset(&dcm_error, f->filehandle);
     if (!f->metadata) {
       _openslide_dicom_propagate_error(err, dcm_error);
       return NULL;
@@ -355,7 +357,7 @@ static struct dicom_file *dicom_file_new(const char *filename,
     if (!get_tag_str(f->metadata, SeriesInstanceUID, 0, &f->slide_id)) {
       g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
                   "SeriesInstanceUID not found");
-      return false;
+      return NULL;
     }
   }
 
@@ -402,7 +404,13 @@ static bool decode_frame(struct dicom_file *file,
   g_mutex_unlock(&file->lock);
 
   if (!frame) {
-    _openslide_dicom_propagate_error(err, dcm_error);
+    if (dcm_error_get_code(dcm_error) == DCM_ERROR_CODE_MISSING_FRAME) {
+      dcm_error_clear(&dcm_error);
+      g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_NO_VALUE,
+                  "No frame for (%"PRId64", %"PRId64")", tile_col, tile_row);
+    } else {
+      _openslide_dicom_propagate_error(err, dcm_error);
+    }
     return false;
   }
 
@@ -452,10 +460,18 @@ static bool read_tile(openslide_t *osr,
                                             &cache_entry);
   if (!tiledata) {
     g_autofree uint32_t *buf = g_malloc(l->base.tile_w * l->base.tile_h * 4);
+    GError *tmp_err = NULL;
     if (!decode_frame(l->file, tile_col, tile_row,
                       buf, l->base.tile_w, l->base.tile_h,
-                      err)) {
-      return false;
+                      &tmp_err)) {
+      if (g_error_matches(tmp_err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_NO_VALUE)) {
+        // missing tile
+        g_clear_error(&tmp_err);
+        return true;
+      } else {
+        g_propagate_error(err, tmp_err);
+        return false;
+      }
     }
 
     // clip, if necessary
@@ -895,20 +911,20 @@ static char *get_element_value_as_string(const DcmElement *element, int index) {
   int64_t i64;
 
   switch (klass) {
-  case DCM_CLASS_STRING_MULTI:
-  case DCM_CLASS_STRING_SINGLE:
+  case DCM_VR_CLASS_STRING_MULTI:
+  case DCM_VR_CLASS_STRING_SINGLE:
     if (dcm_element_get_value_string(NULL, element, index, &str)) {
       return g_strdup(str);
     }
     break;
 
-  case DCM_CLASS_NUMERIC_DECIMAL:
+  case DCM_VR_CLASS_NUMERIC_DECIMAL:
     if (dcm_element_get_value_decimal(NULL, element, index, &d)) {
       return _openslide_format_double(d);
     }
     break;
 
-  case DCM_CLASS_NUMERIC_INTEGER:
+  case DCM_VR_CLASS_NUMERIC_INTEGER:
     if (dcm_element_get_value_integer(NULL, element, index, &i64)) {
       if (vr == DCM_VR_UV) {
         return g_strdup_printf("%"PRIu64, i64);
@@ -918,7 +934,7 @@ static char *get_element_value_as_string(const DcmElement *element, int index) {
     }
     break;
 
-  case DCM_CLASS_BINARY:
+  case DCM_VR_CLASS_BINARY:
   default:
     break;
   }
@@ -939,7 +955,7 @@ static bool add_properties_element(const DcmElement *element,
     return true;
   }
 
-  if (klass == DCM_CLASS_SEQUENCE) {
+  if (klass == DCM_VR_CLASS_SEQUENCE) {
     DcmSequence *seq;
     if (dcm_element_get_value_sequence(NULL, element, &seq)) {
       g_autofree char *new_prefix = g_strdup_printf("%s.%s",
@@ -1081,8 +1097,8 @@ static bool dicom_open(openslide_t *osr,
 
   (void) get_icc_profile(level0->file, &osr->icc_profile_size);
 
-  // no quickhash yet; disable
-  _openslide_hash_disable(quickhash1);
+  // compute quickhash
+  _openslide_hash_string(quickhash1, slide_id);
 
   g_assert(osr->data == NULL);
   g_assert(osr->levels == NULL);

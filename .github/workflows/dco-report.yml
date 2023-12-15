@@ -7,9 +7,11 @@ on:
       - completed
 
 permissions:
-  pull-requests: write
+  contents: none
 
 jobs:
   comment:
     name: Organization
     uses: openslide/.github/.github/workflows/dco-report.yml@main
+    secrets:
+      OPENSLIDE_BOT_TOKEN: ${{ secrets.OPENSLIDE_BOT_TOKEN }}

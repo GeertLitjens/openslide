@@ -1,7 +1,7 @@
-base: Hamamatsu/CMU-1.ndpi
-slide: CMU-1.ndpi
+base: Generic-TIFF/CMU-1.tiff
+slide: CMU-1.tiff
 success: true
-vendor: hamamatsu
+vendor: generic-tiff
 properties:
   openslide.mpp-x: null
   openslide.mpp-y: null
