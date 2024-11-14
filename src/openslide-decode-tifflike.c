@@ -483,9 +483,8 @@ static struct tiff_directory *read_directory(struct _openslide_file *f,
       }
         
       // read in the value/offset extension
-      if (_openslide_fread(f, value+4, 4) != 1) {
-        g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                    "Cannot read value/offset extension");
+      if (!_openslide_fread_exact(f, value+4, 4, err)) {
+        g_prefix_error(err, "Cannot read value/offset extension: ");
         return NULL;
       }
       
