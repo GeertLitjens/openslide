@@ -3,7 +3,7 @@
  *
  *  Copyright (c) 2007-2015 Carnegie Mellon University
  *  Copyright (c) 2011 Google, Inc.
- *  Copyright (c) 2022 Benjamin Gilbert
+ *  Copyright (c) 2022-2024 Benjamin Gilbert
  *  All rights reserved.
  *
  *  OpenSlide is free software: you can redistribute it and/or modify
@@ -57,11 +57,19 @@ struct dicom_file {
 
   GMutex lock;
   DcmFilehandle *filehandle;
+  struct _openslide_dicom_io *dio;
+  uint64_t dio_users;
   const DcmDataSet *file_meta;
   const DcmDataSet *metadata;
   const char *slide_id;
   enum image_format format;
+  J_COLOR_SPACE jpeg_colorspace;
   enum _openslide_jp2k_colorspace jp2k_colorspace;
+};
+
+// g_auto wrapper struct with reference for runtime I/O
+struct dicom_file_io {
+  struct dicom_file *file;
 };
 
 struct dicom_level {
@@ -201,6 +209,30 @@ static void dicom_file_destroy(struct dicom_file *f) {
 typedef struct dicom_file dicom_file;
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(dicom_file, dicom_file_destroy)
 
+// get a dicom_file reference for I/O
+static struct dicom_file_io dicom_file_io_get(struct dicom_file *f) {
+  g_mutex_lock(&f->lock);
+  f->dio_users++;
+  g_mutex_unlock(&f->lock);
+
+  struct dicom_file_io fio = {
+    .file = f,
+  };
+  return fio;
+}
+
+// put a dicom_file reference, and close the underlying _openslide_file if idle
+static void dicom_file_io_put(struct dicom_file_io *fio) {
+  g_mutex_lock(&fio->file->lock);
+  if (!--fio->file->dio_users) {
+    _openslide_dicom_io_suspend(fio->file->dio);
+  }
+  g_mutex_unlock(&fio->file->lock);
+}
+
+typedef struct dicom_file_io dicom_file_io;
+G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(dicom_file_io, dicom_file_io_put)
+
 static bool get_tag_int(const DcmDataSet *dataset,
                         const char *keyword,
                         int64_t *result) {
@@ -326,7 +358,7 @@ static struct dicom_file *dicom_file_new(const char *filename,
   g_autoptr(dicom_file) f = g_new0(struct dicom_file, 1);
   g_mutex_init(&f->lock);
 
-  f->filehandle = _openslide_dicom_open(filename, err);
+  f->filehandle = _openslide_dicom_open(filename, &f->dio, err);
   if (!f->filehandle) {
     return NULL;
   }
@@ -360,6 +392,9 @@ static struct dicom_file *dicom_file_new(const char *filename,
       return NULL;
     }
   }
+
+  // done with I/O for now
+  _openslide_dicom_io_suspend(f->dio);
 
   return g_steal_pointer(&f);
 }
@@ -427,8 +462,9 @@ static bool decode_frame(struct dicom_file *file,
 
   switch (file->format) {
   case FORMAT_JPEG:
-    return _openslide_jpeg_decode_buffer(frame_value, frame_length,
-                                         dest, w, h, err);
+    return _openslide_jpeg_decode_buffer_colorspace(frame_value, frame_length,
+                                                    file->jpeg_colorspace,
+                                                    dest, w, h, err);
   case FORMAT_JPEG2000:
     return _openslide_jp2k_decode_buffer(dest, w, h,
                                          frame_value, frame_length,
@@ -511,6 +547,7 @@ static bool paint_region(openslide_t *osr G_GNUC_UNUSED,
                          GError **err) {
   struct dicom_level *l = (struct dicom_level *) level;
 
+  g_auto(dicom_file_io) fio G_GNUC_UNUSED = dicom_file_io_get(l->file);
   return _openslide_grid_paint_region(l->grid, cr, NULL,
                                       x / l->base.downsample,
                                       y / l->base.downsample,
@@ -558,11 +595,17 @@ static const struct _openslide_ops dicom_ops = {
   .destroy = destroy,
 };
 
-static bool dicom_detect(const char *filename,
-                         struct _openslide_tifflike *tl G_GNUC_UNUSED,
+static bool dicom_detect(const char *filename, struct _openslide_tifflike *tl,
                          GError **err) {
-  // some vendors use dual-personality TIFF/DCM files, so we can't just reject
-  // tifflike files
+  if (tl && (g_str_has_suffix(filename, ".tif") ||
+             g_str_has_suffix(filename, ".tiff"))) {
+    // let the generic-tiff driver handle it
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                "Dual-personality DICOM-TIFF with TIFF filename extension");
+    return false;
+  }
+  // otherwise, ignore any TIFF metadata
+
   g_autoptr(dicom_file) f = dicom_file_new(filename, false, err);
   return f != NULL;
 }
@@ -595,6 +638,7 @@ static bool associated_get_argb_data(struct _openslide_associated_image *img,
                                      uint32_t *dest,
                                      GError **err) {
   struct associated *a = (struct associated *) img;
+  g_auto(dicom_file_io) fio G_GNUC_UNUSED = dicom_file_io_get(a->file);
   return decode_frame(a->file, 0, 0, dest, a->base.w, a->base.h, err);
 }
 
@@ -860,8 +904,13 @@ static bool maybe_add_file(openslide_t *osr,
     }
     break;
   case FORMAT_JPEG:
-    found = g_str_equal(photometric, "YBR_FULL_422") ||
-            g_str_equal(photometric, "RGB");
+    if (g_str_equal(photometric, "YBR_FULL_422")) {
+      f->jpeg_colorspace = JCS_YCbCr;
+      found = true;
+    } else if (g_str_equal(photometric, "RGB")) {
+      f->jpeg_colorspace = JCS_RGB;
+      found = true;
+    }
     break;
   case FORMAT_RGB:
     found = g_str_equal(photometric, "RGB");
@@ -1051,7 +1100,8 @@ static bool dicom_open(openslide_t *osr,
 
   // scan for other DICOMs with this slide id
   const char *name;
-  while ((name = _openslide_dir_next(dir))) {
+  GError *dir_err = NULL;
+  while ((name = _openslide_dir_next(dir, &dir_err))) {
     // no need to add the start file again
     if (g_str_equal(name, basename)) {
       continue;
@@ -1081,6 +1131,10 @@ static bool dicom_open(openslide_t *osr,
       g_prefix_error(err, "Reading %s: ", path);
       return false;
     }
+  }
+  if (dir_err) {
+    g_propagate_error(err, dir_err);
+    return false;
   }
 
   if (level_array->len == 0) {

@@ -158,7 +158,8 @@ static bool read_icc_profile(openslide_t *osr, void *dest, GError **err) {
     return false;
   }
 
-  return _openslide_tiff_read_icc_profile(osr, &l->tiffl, ct.tiff, dest, err);
+  return _openslide_tiff_read_icc_profile(ct.tiff, l->tiffl.dir,
+                                          dest, osr->icc_profile_size, err);
 }
 
 static const struct _openslide_ops generic_tiff_ops = {
@@ -236,8 +237,7 @@ static bool generic_tiff_open(openslide_t *osr,
     // verify that we can read this compression (hard fail if not)
     uint16_t compression;
     if (!TIFFGetField(ct.tiff, TIFFTAG_COMPRESSION, &compression)) {
-      g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                  "Can't read compression scheme");
+      _openslide_tiff_error(err, ct.tiff, "Can't read compression scheme");
       return false;
     };
     if (!TIFFIsCODECConfigured(compression)) {
@@ -282,8 +282,7 @@ static bool generic_tiff_open(openslide_t *osr,
 
   // get icc profile size, if present
   struct level *base_level = level_array->pdata[0];
-  if (!_openslide_tiff_get_icc_profile_size(&base_level->tiffl,
-                                            ct.tiff,
+  if (!_openslide_tiff_get_icc_profile_size(ct.tiff, base_level->tiffl.dir,
                                             &osr->icc_profile_size,
                                             err)) {
     return false;
